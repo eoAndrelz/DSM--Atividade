@@ -1,64 +1,121 @@
 const express = require('express');
 const app = express();
-const { engine } = require('express-handlebars');
 const bodyParser = require('body-parser');
-const cors = require('cors');
+const handlebars = require('express-handlebars').engine;
+
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
-const morgan = require('morgan');
 
 const serviceAccount = require('./serviceAccountKey.json');
+
 initializeApp({
-    credential: cert(serviceAccount),
+    credential: cert(serviceAccount)
 });
 
 const db = getFirestore();
-db.settings({
-    ignoreUndefinedProperties: true,
-});
 
-app.engine('handlebars', engine({ defaultLayout: 'main' }));
+app.engine('handlebars', handlebars({
+    helpers: {
+      eq: function (v1, v2) {
+        return v1 === v2;
+      }
+    }
+  }));
 app.set('view engine', 'handlebars');
 
-app.use(cors());
-app.use(morgan('dev'));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Routes
-app.get('/', async (req, res) => {
-    res.render("primeira_pagina");
+app.get("/", function (req, res) {
+    res.render('primeira_pagina');
 });
 
-app.post("/cadastrar", async (req, res) => {
-    const { nome, telefone, origem, servico, endereco, email } = req.body;
+app.post("/cadastrar", function (req, res) {
+    db.collection('clientes').add({
+        nome: req.body.nome,
+        telefone: req.body.telefone,
+        origem: req.body.origem,
+        data_contato: req.body.data_contato,
+        observacao: req.body.observacao
+    }).then(function () {
+        console.log("Dados cadastrados com sucesso!");
+        res.redirect("/consultar");
+    }).catch(function (error) {
+        console.error("Erro ao cadastrar: ", error);
+        res.status(500).send("Erro ao cadastrar dados.");
+    });
+});
 
-    // Basic validation
-    if (!nome || !telefone || !origem) {
-        return res.status(400).send('Nome, Telefone, and Origem are required.');
-    }
+app.get("/consultar", function (req, res) {
+    var posts = []
+    db.collection('clientes').get().then(
+        function(snapshot){
+            snapshot.forEach(function(doc){
+                const data = doc.data()
+                data.id = doc.id
+                posts.push(data)
+            })
+            console.log(posts)
+            res.render('consulta', {posts: posts})
+        }
+    )
+});
 
-    const data = {
-        nome: nome || null,
-        telefone: telefone || null,
-        origem: origem || null,
-        email: email || null,
-        status: 'Novo',
-        servico: servico || null,
-        endereco: endereco || null,
+
+app.post("/atualizar", function (req, res) {
+    const id = req.body.id;
+    console.log("ID recebido:", id);
+
+    const dadosAtualizados = {
+        nome: req.body.nome,
+        telefone: req.body.telefone,
+        origem: req.body.origem,
+        data_contato: req.body.data_contato,
+        observacao: req.body.observacao
     };
 
-    try {
-        await db.collection('clientes').add(data);
-        console.log('Dados cadastrados:', data);
-        res.redirect('/');
-    } catch (err) {
-        console.error('Erro ao cadastrar: ', err);
-        res.status(500).send('Erro ao cadastrar');
-    }
+    db.collection('clientes').doc(id).update(dadosAtualizados)
+        .then(function () {
+            console.log("Dados atualizados com sucesso!");
+            res.redirect("/consultar");
+        })
+        .catch(function (error) {
+            console.error("Erro ao atualizar: ", error);
+            res.status(500).send("Erro ao atualizar dados.");
+        });
 });
 
-// Start server
-app.listen(8081, () => {
-    console.log('Servidor rodando na url http://localhost:8081');
+
+
+app.get("/editar/:id", function (req, res) {
+    var posts = []
+    const id = req.params.id
+    const clientes = db.collection('clientes').doc(id).get().then(
+        function (doc) {
+            const data = doc.data()
+            data.id = doc.id
+            posts.push(data)
+            console.log({ posts: posts })
+            res.render('editar', { posts: posts })
+        }
+    )
+});
+
+app.get("/excluir/:id", function (req, res) {
+    const id = req.params.id;
+
+    db.collection('clientes').doc(id).delete()
+        .then(function () {
+            console.log("Cliente excluído com sucesso!");
+            res.redirect("/consultar");
+        })
+        .catch(function (error) {
+            console.error("Erro ao excluir cliente: ", error);
+            res.status(500).send("Erro ao excluir cliente.");
+        });
+});
+
+
+app.listen(8081, function () {
+    console.log("Servidor Ativo na porta 8081");
 });
